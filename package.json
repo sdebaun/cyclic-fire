@@ -13,7 +13,7 @@
     "start": "npm install && npm prune && validate-commit-msg",
     "dist": "browserify src/index.js -t babelify -t browserify-shim --standalone library-starter-kit --exclude most --outfile dist/library-starter-kit.js",
     "postdist": "uglifyjs dist/library-starter-kit.js -o dist/library-starter-kit.min.js",
-    "lib": "babel --presets es2015 stage-0 -d dist/ src/",
+    "lib": "babel -d dist/ src/",
     "preversion": "npm run docs && git add docs/ && git commit -m 'chore(): build docs/' && npm run dist && git add dist/ && git commit -m 'chore(): build dist/'",
     "prepublish": "npm run lib",
     "release": "npm run release-patch",
@@ -49,5 +49,8 @@
     "isparta": "^4.0.0",
     "testem": "^1.3.0",
     "validate-commit-message": "^3.0.1"
+  },
+  "dependencies": {
+    "rx": "^4.0.7"    
   }
 }

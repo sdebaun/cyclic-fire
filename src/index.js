@@ -1,5 +1,4 @@
 import {Observable} from 'rx'
-import Firebase from 'firebase'
 
 export const POPUP = 'popup'
 export const REDIRECT = 'redirect'
