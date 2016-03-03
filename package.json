@@ -1,0 +1,55 @@
+{
+  "name": "cyclic-fire",
+  "version": "1.0.0",
+  "description": "Yet another cyclejs driver for Firebase",
+  "main": "dist/index.js",
+  "scripts": {
+    "docs": "rm -rf docs && mkdir docs && documentation -t documentation-theme-default -f 'html' -g -o docs/ src/*.js",
+    "eslint": "eslint src/",
+    "test-node": "babel-node ./node_modules/.bin/isparta cover _mocha test/node/index.js",
+    "test-browser": "testem",
+    "test-ci": "testem ci",
+    "test": "npm run eslint && npm run test-node && npm run test-browser",
+    "start": "npm install && npm prune && validate-commit-msg",
+    "predist": "rm -rf dist/ && mkdir -p dist/",
+    "dist": "browserify src/index.js -t babelify -t browserify-shim --standalone library-starter-kit --exclude most --outfile dist/library-starter-kit.js",
+    "postdist": "uglifyjs dist/library-starter-kit.js -o dist/library-starter-kit.min.js",
+    "prelib": "rm -rf lib/ && mkdir -p lib",
+    "lib": "babel --presets es2015 -d lib/ src/",
+    "preversion": "npm run docs && git add docs/ && git commit -m 'chore(): build docs/' && npm run dist && git add dist/ && git commit -m 'chore(): build dist/'",
+    "prepublish": "npm run lib",
+    "release": "npm run release-patch",
+    "release-patch": "git checkout master && release patch && npm publish --access=public",
+    "release-minor": "git checkout master && release minor && npm publish --access=public",
+    "release-major": "git checkout master && release major && npm publish --access=public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sdebaun/cyclic-fire.git"
+  },
+  "author": "'sdebaun' <'sdebaun74@gmail.com'>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sdebaun/cyclic-fire/issues"
+  },
+  "homepage": "https://github.com/sdebaun/cyclic-fire#readme",
+  "devDependencies": {
+    "babel-cli": "^6.5.1",
+    "babel-core": "^6.5.2",
+    "babel-eslint": "^5.0.0",
+    "babel-preset-es2015": "^6.5.0",
+    "babel-preset-stage-0": "^6.5.0",
+    "babelify": "^7.2.0",
+    "browserify": "^13.0.0",
+    "browserify-shim": "^3.8.12",
+    "cli-release": "^1.0.4",
+    "documentation": "^4.0.0-beta",
+    "eslint": "^2.1.0",
+    "eslint-config-cycle": "^3.2.0",
+    "eslint-plugin-cycle": "^1.0.2",
+    "eslint-plugin-no-class": "^0.1.0",
+    "isparta": "^4.0.0",
+    "testem": "^1.3.0",
+    "validate-commit-message": "^3.0.1"
+  }
+}
