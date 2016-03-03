@@ -7,6 +7,8 @@ exports.makeQueueDriver = exports.makeFirebaseDriver = exports.makeAuthDriver = 
 
 var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj; };
 
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
 var _rx = require('rx');
 
 function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
@@ -23,7 +25,7 @@ var FirebaseStream = function FirebaseStream(ref, evtName) {
       return obs.onNext(snap);
     });
   }).map(function (snap) {
-    return snap.val();
+    return _extends({ key: snap.key() }, snap.val());
   }).shareReplay(1);
 };
 // .replay(null,1)
@@ -127,10 +129,8 @@ var makeQueueDriver = exports.makeQueueDriver = function makeQueueDriver(ref) {
       return ref.child(dest).push(item);
     });
     return function (key) {
-      return ChildAddedStream(ref.child(src).child(key)).doAction(function (snap) {
-        return snap.ref().remove();
-      }).map(function (snap) {
-        return snap.val();
+      return ChildAddedStream(ref.child(src).child(key)).doAction(function (response) {
+        return ref.child(src).child(key).child(response.key).remove();
       });
     };
   };
