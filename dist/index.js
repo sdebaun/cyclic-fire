@@ -123,14 +123,18 @@ var makeQueueDriver = exports.makeQueueDriver = function makeQueueDriver(ref) {
   var src = arguments.length <= 1 || arguments[1] === undefined ? 'responses' : arguments[1];
   var dest = arguments.length <= 2 || arguments[2] === undefined ? 'tasks' : arguments[2];
   return function ($input) {
+    var srcRef = ref.child(src);
+    var destRef = ref.child(dest);
+
     $input.doAction(function (x) {
       return console.log('queue input', x);
     }).subscribe(function (item) {
-      return ref.child(dest).push(item);
+      return destRef.push(item);
     });
+
     return function (key) {
       return ChildAddedStream(ref.child(src).child(key)).doAction(function (response) {
-        return ref.child(src).child(key).child(response.key).remove();
+        return srcRef.child(key).child(response.key).remove();
       });
     };
   };
