@@ -16,7 +16,7 @@ There are three actual drivers in this package, you can use any or all of them a
 
 ### Contributions
 
-Development is driven by in-house developers at the Sparks.Network.  Public participation (up to and including pull requests) are welcome.  We are investigating ways to reward outside contributions to the code with both cash and equity.  Please email [Steve DeBaun](mailto://sdebaun@sparks.network) with suggestions!
+Development is driven by in-house developers at the Sparks.Network.  Public participation (up to and including pull requests) are welcome.
 
 ## Example of Use
 
