@@ -8,13 +8,17 @@ export const LOGOUT = 'logout'
 
 const FirebaseStream = (ref,evtName) =>
   Observable.create(obs => ref.on(evtName, (snap) => obs.onNext(snap)))
-    .map(snap => ({key: snap.key(), ...snap.val()}))
-    .shareReplay(1)
+    .map(snap => ({key: snap.key(), val: snap.val()}))
+    // .map(snap => ({key: snap.key(), ...snap.val()}))
+    .distinctUntilChanged()
     // .replay(null,1)
 
-const ValueStream = ref => FirebaseStream(ref,'value')
+const ValueStream = ref => FirebaseStream(ref,'value').pluck('val')
+  .shareReplay(1)
 
 const ChildAddedStream = ref => FirebaseStream(ref,'child_added')
+  // .map(({key,val}) => ({key, ...val}))
+  .share()
 
 // factory takes a FB reference, returns a driver
 // source: produces a stream of auth state updates from Firebase.onAuth
@@ -23,19 +27,20 @@ const ChildAddedStream = ref => FirebaseStream(ref,'child_added')
 //  provider: optional 'google' or 'facebook' for some actions
 export const makeAuthDriver = ref => {
   const auth$ = Observable.create(obs => ref.onAuth(auth => obs.onNext(auth)))
+  const scope = 'email'
 
   const actionMap = {
-    [POPUP]: 'authWithOAuthPopup',
-    [REDIRECT]: 'authWithOAuthRedirect',
-    [LOGOUT]: 'unauth',
+    [POPUP]: prov => ref.authWithOAuthPopup(prov, () => {}, {scope}),
+    [REDIRECT]: prov => ref.authWithOAuthRedirect(prov, () => {}, {scope}),
+    [LOGOUT]: prov => ref.unauth(prov),
   }
 
   return input$ => {
     input$.subscribe(({type,provider}) => {
-      console.log('auth$ received',type,provider,actionMap[type])
-      ref[actionMap[type]](provider)
+      console.log('auth$ received',type,provider)
+      actionMap[type](provider)
     })
-    return auth$.shareReplay(1)
+    return auth$.distinctUntilChanged().shareReplay(1)
   }
 }
 
@@ -68,6 +73,11 @@ export const makeFirebaseDriver = ref => {
     (...args) => cacheOrBuild(String(args),args)
 }
 
+const deleteResponse = (ref, listenerKey, responseKey) => {
+  console.log('removing',ref.key(),listenerKey,responseKey)
+  ref.child(listenerKey).child(responseKey).remove()
+}
+
 // talks to FirebaseQueue on the backend
 // factory takes FB ref, plus path names for src and dest locs, returns driver
 // source: a function, called with key, returns stream of new items on that key
@@ -81,8 +91,9 @@ export const makeQueueDriver = (ref, src = 'responses', dest = 'tasks') =>
       .doAction(x => console.log('queue input',x))
       .subscribe(item => destRef.push(item))
 
-    return key =>
-      ChildAddedStream(ref.child(src).child(key))
-        .doAction(response => srcRef.child(key).child(response.key).remove())
+    return listenerKey =>
+      ChildAddedStream(srcRef.child(listenerKey))
+        .doAction(({key}) => deleteResponse(srcRef,listenerKey,key))
+        // .doAction(response => srcRef.child(key).child(response.key).remove())
   }
 
