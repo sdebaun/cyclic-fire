@@ -7,8 +7,6 @@ exports.makeQueueDriver = exports.makeFirebaseDriver = exports.makeAuthDriver = 
 
 var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj; };
 
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-
 var _rx = require('rx');
 
 function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
@@ -25,17 +23,21 @@ var FirebaseStream = function FirebaseStream(ref, evtName) {
       return obs.onNext(snap);
     });
   }).map(function (snap) {
-    return _extends({ key: snap.key() }, snap.val());
-  }).shareReplay(1);
+    return { key: snap.key(), val: snap.val() };
+  })
+  // .map(snap => ({key: snap.key(), ...snap.val()}))
+  .distinctUntilChanged();
 };
 // .replay(null,1)
 
 var ValueStream = function ValueStream(ref) {
-  return FirebaseStream(ref, 'value');
+  return FirebaseStream(ref, 'value').pluck('val').shareReplay(1);
 };
 
 var ChildAddedStream = function ChildAddedStream(ref) {
-  return FirebaseStream(ref, 'child_added');
+  return FirebaseStream(ref, 'child_added')
+  // .map(({key,val}) => ({key, ...val}))
+  .share();
 };
 
 // factory takes a FB reference, returns a driver
@@ -51,18 +53,25 @@ var makeAuthDriver = exports.makeAuthDriver = function makeAuthDriver(ref) {
       return obs.onNext(auth);
     });
   });
+  var scope = 'email';
 
-  var actionMap = (_actionMap = {}, _defineProperty(_actionMap, POPUP, 'authWithOAuthPopup'), _defineProperty(_actionMap, REDIRECT, 'authWithOAuthRedirect'), _defineProperty(_actionMap, LOGOUT, 'unauth'), _actionMap);
+  var actionMap = (_actionMap = {}, _defineProperty(_actionMap, POPUP, function (prov) {
+    return ref.authWithOAuthPopup(prov, function () {}, { scope: scope });
+  }), _defineProperty(_actionMap, REDIRECT, function (prov) {
+    return ref.authWithOAuthRedirect(prov, function () {}, { scope: scope });
+  }), _defineProperty(_actionMap, LOGOUT, function (prov) {
+    return ref.unauth(prov);
+  }), _actionMap);
 
   return function (input$) {
     input$.subscribe(function (_ref) {
       var type = _ref.type;
       var provider = _ref.provider;
 
-      console.log('auth$ received', type, provider, actionMap[type]);
-      ref[actionMap[type]](provider);
+      console.log('auth$ received', type, provider);
+      actionMap[type](provider);
     });
-    return auth$.shareReplay(1);
+    return auth$.distinctUntilChanged().shareReplay(1);
   };
 };
 
@@ -115,6 +124,11 @@ var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDrive
   };
 };
 
+var deleteResponse = function deleteResponse(ref, listenerKey, responseKey) {
+  console.log('removing', ref.key(), listenerKey, responseKey);
+  ref.child(listenerKey).child(responseKey).remove();
+};
+
 // talks to FirebaseQueue on the backend
 // factory takes FB ref, plus path names for src and dest locs, returns driver
 // source: a function, called with key, returns stream of new items on that key
@@ -132,10 +146,12 @@ var makeQueueDriver = exports.makeQueueDriver = function makeQueueDriver(ref) {
       return destRef.push(item);
     });
 
-    return function (key) {
-      return ChildAddedStream(ref.child(src).child(key)).doAction(function (response) {
-        return srcRef.child(key).child(response.key).remove();
+    return function (listenerKey) {
+      return ChildAddedStream(srcRef.child(listenerKey)).doAction(function (_ref3) {
+        var key = _ref3.key;
+        return deleteResponse(srcRef, listenerKey, key);
       });
     };
+    // .doAction(response => srcRef.child(key).child(response.key).remove())
   };
 };
