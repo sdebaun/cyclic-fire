@@ -1,5 +1,7 @@
 import {Observable} from 'rx'
 
+// import hash from 'object-hash'
+
 export const POPUP = 'popup'
 export const REDIRECT = 'redirect'
 export const LOGOUT = 'logout'
@@ -9,15 +11,12 @@ export const LOGOUT = 'logout'
 const FirebaseStream = (ref,evtName) =>
   Observable.create(obs => ref.on(evtName, (snap) => obs.onNext(snap)))
     .map(snap => ({key: snap.key(), val: snap.val()}))
-    // .map(snap => ({key: snap.key(), ...snap.val()}))
     .distinctUntilChanged()
-    // .replay(null,1)
 
 const ValueStream = ref => FirebaseStream(ref,'value').pluck('val')
   .shareReplay(1)
 
 const ChildAddedStream = ref => FirebaseStream(ref,'child_added')
-  // .map(({key,val}) => ({key, ...val}))
   .share()
 
 // factory takes a FB reference, returns a driver
@@ -70,7 +69,7 @@ export const makeFirebaseDriver = ref => {
   const cacheOrBuild = (key,args) => cache[key] || (cache[key] = build(args))
 
   return () =>
-    (...args) => cacheOrBuild(String(args),args)
+    (...args) => cacheOrBuild(JSON.stringify(args),args)
 }
 
 const deleteResponse = (ref, listenerKey, responseKey) => {
@@ -94,6 +93,5 @@ export const makeQueueDriver = (ref, src = 'responses', dest = 'tasks') =>
     return listenerKey =>
       ChildAddedStream(srcRef.child(listenerKey))
         .doAction(({key}) => deleteResponse(srcRef,listenerKey,key))
-        // .doAction(response => srcRef.child(key).child(response.key).remove())
   }
 
