@@ -1,7 +1,5 @@
 import {Observable} from 'rx'
 
-// import hash from 'object-hash'
-
 export const POPUP = 'popup'
 export const REDIRECT = 'redirect'
 export const LOGOUT = 'logout'
