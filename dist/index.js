@@ -11,6 +11,8 @@ var _rx = require('rx');
 
 function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
 
+// import hash from 'object-hash'
+
 var POPUP = exports.POPUP = 'popup';
 var REDIRECT = exports.REDIRECT = 'redirect';
 var LOGOUT = exports.LOGOUT = 'logout';
@@ -24,20 +26,15 @@ var FirebaseStream = function FirebaseStream(ref, evtName) {
     });
   }).map(function (snap) {
     return { key: snap.key(), val: snap.val() };
-  })
-  // .map(snap => ({key: snap.key(), ...snap.val()}))
-  .distinctUntilChanged();
+  }).distinctUntilChanged();
 };
-// .replay(null,1)
 
 var ValueStream = function ValueStream(ref) {
   return FirebaseStream(ref, 'value').pluck('val').shareReplay(1);
 };
 
 var ChildAddedStream = function ChildAddedStream(ref) {
-  return FirebaseStream(ref, 'child_added')
-  // .map(({key,val}) => ({key, ...val}))
-  .share();
+  return FirebaseStream(ref, 'child_added').share();
 };
 
 // factory takes a FB reference, returns a driver
@@ -119,7 +116,7 @@ var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDrive
         args[_key] = arguments[_key];
       }
 
-      return cacheOrBuild(String(args), args);
+      return cacheOrBuild(JSON.stringify(args), args);
     };
   };
 };
@@ -152,6 +149,5 @@ var makeQueueDriver = exports.makeQueueDriver = function makeQueueDriver(ref) {
         return deleteResponse(srcRef, listenerKey, key);
       });
     };
-    // .doAction(response => srcRef.child(key).child(response.key).remove())
   };
 };

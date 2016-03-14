@@ -1,6 +1,6 @@
 {
   "name": "cyclic-fire",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Yet another cyclejs driver for Firebase",
   "main": "dist/index.js",
   "scripts": {
@@ -51,6 +51,6 @@
     "validate-commit-message": "^3.0.1"
   },
   "dependencies": {
-    "rx": "^4.0.7"    
+    "rx": "^4.0.7"
   }
 }
