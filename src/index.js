@@ -1,4 +1,4 @@
-import {Observable} from 'rx'
+import {Observable, CompositeDisposable} from 'rx'
 
 export const POPUP = 'popup'
 export const REDIRECT = 'redirect'
@@ -37,7 +37,10 @@ export const makeAuthDriver = ref => {
       console.log('auth$ received',type,provider)
       actionMap[type](provider)
     })
-    return auth$.distinctUntilChanged().shareReplay(1)
+    let stream = auth$.distinctUntilChanged().replay(null, 1)
+    const disposable = stream.connect()
+    stream.dispose = () => disposable.dispose()
+    return stream
   }
 }
 
@@ -48,6 +51,7 @@ export const makeAuthDriver = ref => {
 // sinks: none.  to write, see makeQueueDriver
 export const makeFirebaseDriver = ref => {
   const cache = {}
+  const compositeDisposable = new CompositeDisposable()
 
   // there are other chainable firebase query buiders, this is wot we need now
   const query = (parentRef,{orderByChild,equalTo}) => {
@@ -61,13 +65,21 @@ export const makeFirebaseDriver = ref => {
   const chain = (a,v) => typeof v === 'object' && query(a,v) || a.child(v)
 
   // building query from fb api is simply mapping the args to chained fn calls
-  const build = (args) => ValueStream(args.reduce(chain,ref)).shareReplay()
+  const build = (args) => {
+    const stream = ValueStream(args.reduce(chain,ref)).replay(null, 1)
+    const disposable = stream.connect()
+    compositeDisposable.add(disposable)
+    return stream
+  }
 
   // SIDE EFFECT: build and add to cache if not in cache
   const cacheOrBuild = (key,args) => cache[key] || (cache[key] = build(args))
 
-  return () =>
-    (...args) => cacheOrBuild(JSON.stringify(args),args)
+  return function firebaseDriver() {
+    let fn = (...args) => cacheOrBuild(JSON.stringify(args),args)
+    fn.dispose = () => compositeDisposable.dispose()
+    return fn
+  }
 }
 
 const deleteResponse = (ref, listenerKey, responseKey) => {
@@ -92,4 +104,3 @@ export const makeQueueDriver = (ref, src = 'responses', dest = 'tasks') =>
       ChildAddedStream(srcRef.child(listenerKey))
         .doAction(({key}) => deleteResponse(srcRef,listenerKey,key))
   }
-
