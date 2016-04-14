@@ -11,8 +11,6 @@ var _rx = require('rx');
 
 function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
 
-// import hash from 'object-hash'
-
 var POPUP = exports.POPUP = 'popup';
 var REDIRECT = exports.REDIRECT = 'redirect';
 var LOGOUT = exports.LOGOUT = 'logout';
@@ -68,7 +66,12 @@ var makeAuthDriver = exports.makeAuthDriver = function makeAuthDriver(ref) {
       console.log('auth$ received', type, provider);
       actionMap[type](provider);
     });
-    return auth$.distinctUntilChanged().shareReplay(1);
+    var stream = auth$.distinctUntilChanged().replay(null, 1);
+    var disposable = stream.connect();
+    stream.dispose = function () {
+      return disposable.dispose();
+    };
+    return stream;
   };
 };
 
@@ -79,6 +82,7 @@ var makeAuthDriver = exports.makeAuthDriver = function makeAuthDriver(ref) {
 // sinks: none.  to write, see makeQueueDriver
 var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDriver(ref) {
   var cache = {};
+  var compositeDisposable = new _rx.CompositeDisposable();
 
   // there are other chainable firebase query buiders, this is wot we need now
   var query = function query(parentRef, _ref2) {
@@ -102,7 +106,10 @@ var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDrive
 
   // building query from fb api is simply mapping the args to chained fn calls
   var build = function build(args) {
-    return ValueStream(args.reduce(chain, ref)).shareReplay();
+    var stream = ValueStream(args.reduce(chain, ref)).replay(null, 1);
+    var disposable = stream.connect();
+    compositeDisposable.add(disposable);
+    return stream;
   };
 
   // SIDE EFFECT: build and add to cache if not in cache
@@ -110,14 +117,18 @@ var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDrive
     return cache[key] || (cache[key] = build(args));
   };
 
-  return function () {
-    return function () {
+  return function firebaseDriver() {
+    var fn = function fn() {
       for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
         args[_key] = arguments[_key];
       }
 
       return cacheOrBuild(JSON.stringify(args), args);
     };
+    fn.dispose = function () {
+      return compositeDisposable.dispose();
+    };
+    return fn;
   };
 };
 
