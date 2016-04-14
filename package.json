@@ -1,6 +1,6 @@
 {
   "name": "cyclic-fire",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Yet another cyclejs driver for Firebase",
   "main": "dist/index.js",
   "scripts": {
