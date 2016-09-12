@@ -1,6 +1,6 @@
 {
-  "name": "cyclic-fire",
-  "version": "2.0.2",
+  "name": "@sparksnetwork/cyclic-fire",
+  "version": "3.0.0-rc13",
   "description": "Yet another cyclejs driver for Firebase",
   "main": "dist/index.js",
   "scripts": {
@@ -51,5 +51,8 @@
   },
   "dependencies": {
     "rx": "^4.0.7"
+  },
+  "peerDependencies": {
+    "firebase": ">=3"
   }
 }

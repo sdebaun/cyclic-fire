@@ -23,7 +23,7 @@ var FirebaseStream = function FirebaseStream(ref, evtName) {
       return obs.onNext(snap);
     });
   }).map(function (snap) {
-    return { key: snap.key(), val: snap.val() };
+    return { key: snap.key, val: snap.val() };
   }).distinctUntilChanged();
 };
 
@@ -40,39 +40,146 @@ var ChildAddedStream = function ChildAddedStream(ref) {
 // sink: consumes a stream of {type,provider} actions where
 //  type: POPUP, REDIRECT, or LOGOUT actions
 //  provider: optional 'google' or 'facebook' for some actions
-var makeAuthDriver = exports.makeAuthDriver = function makeAuthDriver(ref) {
+var makeAuthDriver = exports.makeAuthDriver = function makeAuthDriver(firebase) {
   var _actionMap;
 
-  var auth$ = _rx.Observable.create(function (obs) {
-    return ref.onAuth(function (auth) {
-      return obs.onNext(auth);
+  if (firebase.authMigrator) {
+    firebase.authMigrator().migrate().then(function (user) {
+      if (!user) {
+        return;
+      }
+    }).catch(function (error) {
+      console.log('auth migration error:', error);
     });
-  });
-  var scope = 'email';
+  }
 
+  // Maps an action string to a function in Firebase auth
   var actionMap = (_actionMap = {}, _defineProperty(_actionMap, POPUP, function (prov) {
-    return ref.authWithOAuthPopup(prov, function () {}, { scope: scope });
+    return firebase.auth().signInWithPopup(prov);
   }), _defineProperty(_actionMap, REDIRECT, function (prov) {
-    return ref.authWithOAuthRedirect(prov, function () {}, { scope: scope });
-  }), _defineProperty(_actionMap, LOGOUT, function (prov) {
-    return ref.unauth(prov);
+    return firebase.auth().signInWithRedirect(prov);
+  }), _defineProperty(_actionMap, LOGOUT, function () {
+    return firebase.auth().signOut();
   }), _actionMap);
 
-  return function (input$) {
-    input$.subscribe(function (_ref) {
-      var type = _ref.type;
-      var provider = _ref.provider;
+  /**
+  * Create the auth stream that emits a user.
+  *
+  *  - Listens for getRedirectResult first. If that has a user then it emits
+  *    that user. Otherwise it sets a flag that we've dealt with redirects
+  *
+  *  - Emits the user (or null) from onAuthStateChanged, but only once the
+  *    redirect result is known.
+  */
+  var auth$ = _rx.Observable.create(function (observer) {
+    var hasRedirectResult = false;
 
-      console.log('auth$ received', type, provider);
-      actionMap[type](provider);
+    // This function calls the observer only when hasRedirectResult is true
+    var nextUser = function nextUser(user) {
+      if (hasRedirectResult) {
+        observer.onNext(user);
+      }
+    };
+
+    // Add onAuthStateChanged listener
+    var unsubscribe = firebase.auth().onAuthStateChanged(function (user) {
+      if (user && firebase.authMigrator) {
+        firebase.authMigrator().clearLegacyAuth();
+      }
+
+      nextUser(user);
     });
+
+    // getRedirectResult listener
+    firebase.auth().getRedirectResult().then(function (result) {
+      hasRedirectResult = true;
+
+      if (result.user) {
+        nextUser(result.user);
+      }
+    })
+    // Always set the flag
+    .catch(function () {
+      hasRedirectResult = true;
+    });
+
+    return unsubscribe;
+  });
+
+  /**
+   * When given a name this will return an object created from the firebase
+   * auth classes. Example, giving 'google' will return an instance of
+   * firebase.auth.GoogleAuthProvider.
+   *
+   * @param {string} name
+   * @returns {Object}
+   */
+  function providerObject(name) {
+    if (typeof name === 'string') {
+      var className = name[0].toUpperCase() + name.slice(1) + 'AuthProvider';
+      return new firebase.auth[className]();
+    }
+    return name;
+  }
+
+  /**
+  * Perform an authentication action. The input should have provider and type,
+  * plus the optional scopes array.
+  *
+  * @param {Object} input
+  * @param {Object|string} input.provider
+  * @param {string} input.type 'popup', 'redirect' or 'logout'
+  * @param {Array<string>} input.scopes a list of OAuth scopes to add to the
+  *   provider
+  * @return {void}
+  */
+  function authAction(input) {
+    console.log(input);
+    var provider = providerObject(input.provider);
+    var scopes = input.scopes || [];
+
+    var _iteratorNormalCompletion = true;
+    var _didIteratorError = false;
+    var _iteratorError = undefined;
+
+    try {
+      for (var _iterator = scopes[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+        var scope = _step.value;
+
+        provider.addScope(scope);
+      }
+    } catch (err) {
+      _didIteratorError = true;
+      _iteratorError = err;
+    } finally {
+      try {
+        if (!_iteratorNormalCompletion && _iterator.return) {
+          _iterator.return();
+        }
+      } finally {
+        if (_didIteratorError) {
+          throw _iteratorError;
+        }
+      }
+    }
+
+    var action = actionMap[input.type];
+    return action(provider);
+  }
+
+  function authDriver(input$) {
+    var inputSubscription = input$.subscribe(authAction);
+
     var stream = auth$.distinctUntilChanged().replay(null, 1);
     var disposable = stream.connect();
     stream.dispose = function () {
-      return disposable.dispose();
+      disposable.dispose();
+      inputSubscription.dispose();
     };
     return stream;
-  };
+  }
+
+  return authDriver;
 };
 
 // factory takes a FB reference, returns a driver
@@ -85,9 +192,9 @@ var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDrive
   var compositeDisposable = new _rx.CompositeDisposable();
 
   // there are other chainable firebase query buiders, this is wot we need now
-  var query = function query(parentRef, _ref2) {
-    var orderByChild = _ref2.orderByChild;
-    var equalTo = _ref2.equalTo;
+  var query = function query(parentRef, _ref) {
+    var orderByChild = _ref.orderByChild;
+    var equalTo = _ref.equalTo;
 
     var childRef = parentRef;
     if (orderByChild) {
@@ -133,7 +240,7 @@ var makeFirebaseDriver = exports.makeFirebaseDriver = function makeFirebaseDrive
 };
 
 var deleteResponse = function deleteResponse(ref, listenerKey, responseKey) {
-  console.log('removing', ref.key(), listenerKey, responseKey);
+  console.log('removing', ref.key, listenerKey, responseKey);
   ref.child(listenerKey).child(responseKey).remove();
 };
 
@@ -155,8 +262,8 @@ var makeQueueDriver = exports.makeQueueDriver = function makeQueueDriver(ref) {
     });
 
     return function (listenerKey) {
-      return ChildAddedStream(srcRef.child(listenerKey)).doAction(function (_ref3) {
-        var key = _ref3.key;
+      return ChildAddedStream(srcRef.child(listenerKey)).doAction(function (_ref2) {
+        var key = _ref2.key;
         return deleteResponse(srcRef, listenerKey, key);
       });
     };
