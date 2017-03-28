@@ -8,7 +8,7 @@ export const LOGOUT = 'logout'
 
 const FirebaseStream = (ref,evtName) =>
   Observable.create(obs => ref.on(evtName, (snap) => obs.onNext(snap)))
-    .map(snap => ({key: snap.key(), val: snap.val()}))
+    .map(snap => ({key: snap.key, val: snap.val()}))
     .distinctUntilChanged()
 
 const ValueStream = ref => FirebaseStream(ref,'value').pluck('val')
@@ -22,26 +22,135 @@ const ChildAddedStream = ref => FirebaseStream(ref,'child_added')
 // sink: consumes a stream of {type,provider} actions where
 //  type: POPUP, REDIRECT, or LOGOUT actions
 //  provider: optional 'google' or 'facebook' for some actions
-export const makeAuthDriver = ref => {
-  const auth$ = Observable.create(obs => ref.onAuth(auth => obs.onNext(auth)))
-  const scope = 'email'
-
-  const actionMap = {
-    [POPUP]: prov => ref.authWithOAuthPopup(prov, () => {}, {scope}),
-    [REDIRECT]: prov => ref.authWithOAuthRedirect(prov, () => {}, {scope}),
-    [LOGOUT]: prov => ref.unauth(prov),
+export const makeAuthDriver = firebase => {
+  if (firebase.authMigrator) {
+    firebase.authMigrator().migrate().then(user => {
+      if (!user) {
+        return
+      }
+    }).catch(error => {
+      console.log('auth migration error:', error)
+    })
   }
 
-  return input$ => {
-    input$.subscribe(({type,provider}) => {
-      console.log('auth$ received',type,provider)
-      actionMap[type](provider)
+  // Maps an action string to a function in Firebase auth
+  const actionMap = {
+    [POPUP]: prov => firebase.auth().signInWithPopup(prov),
+    [REDIRECT]: prov => firebase.auth().signInWithRedirect(prov),
+    [LOGOUT]: () => firebase.auth().signOut(),
+  }
+
+  /**
+  * Create the auth stream that emits a user.
+  *
+  *  - Listens for getRedirectResult first. If that has a user then it emits
+  *    that user. Otherwise it sets a flag that we've dealt with redirects
+  *
+  *  - Emits the user (or null) from onAuthStateChanged, but only once the
+  *    redirect result is known.
+  */
+  const auth$ = Observable.create(observer => {
+    let hasRedirectResult = false
+
+    // This function calls the observer only when hasRedirectResult is true
+    const nextUser = user => {
+      if (hasRedirectResult) {
+        console.log(`authenticated user :`, {
+          displayName: user && user.displayName,
+          uid: user && user.uid,
+          email: user && user.email,
+          emailVerified: user && user.emailVerified
+        })
+        observer.onNext(user)
+      }
+    }
+
+    // Add onAuthStateChanged listener
+    const unsubscribe = firebase.auth().onAuthStateChanged(user => {
+      if (user && firebase.authMigrator) {
+        firebase.authMigrator().clearLegacyAuth()
+      }
+
+      nextUser(user)
+    }, function errorHandler(error) {
+      console.error(`firebase.auth().onAuthStateChanged fails with error ${error.code}`, error)
+    }, function completeHandler() {
+      console.info(`firebase.auth().onAuthStateChanged listener is removed`)
     })
+
+    // getRedirectResult listener
+    firebase.auth().getRedirectResult().then(result => {
+      hasRedirectResult = true
+
+      if (result.user) {
+        nextUser(result.user)
+      }
+    })
+    // Always set the flag
+    .catch(function (error){
+      console.error(`firebase.auth().getRedirectResult fails with error ${error.code}`, error)
+      hasRedirectResult = true
+    })
+
+    return unsubscribe
+  })
+
+  /**
+   * When given a name this will return an object created from the firebase
+   * auth classes. Example, giving 'google' will return an instance of
+   * firebase.auth.GoogleAuthProvider.
+   *
+   * @param {string} name
+   * @returns {Object}
+   */
+  function providerObject(name) {
+    if (typeof name === 'string') {
+      const className = name[0].toUpperCase() + name.slice(1) + 'AuthProvider'
+      return new firebase.auth[className]()
+    }
+    return name
+  }
+
+  /**
+  * Perform an authentication action. The input should have provider and type,
+  * plus the optional scopes array.
+  *
+  * @param {Object} input
+  * @param {Object|string} input.provider
+  * @param {string} input.type 'popup', 'redirect' or 'logout'
+  * @param {Array<string>} input.scopes a list of OAuth scopes to add to the
+  *   provider
+  * @return {function}
+  */
+  function authAction(input) {
+    console.log(input)
+    const provider = providerObject(input.provider)
+    const scopes = input.scopes || []
+
+    for (let scope of scopes) {
+      provider.addScope(scope)
+    }
+
+    const action = actionMap[input.type]
+    return action(provider);
+  }
+
+  function authDriver(input$) {
+    const inputSubscription = input$.subscribe(authAction, function authErrorHandler(error) {
+      console.error(`firebase.auth fails with error ${error.code}`, error)
+    })
+
     let stream = auth$.distinctUntilChanged().replay(null, 1)
     const disposable = stream.connect()
-    stream.dispose = () => disposable.dispose()
+    stream.dispose = () => {
+      disposable.dispose()
+      inputSubscription.dispose()
+      console.info(`disposing auth subscription`)
+    }
     return stream
   }
+
+  return authDriver
 }
 
 // factory takes a FB reference, returns a driver
@@ -66,7 +175,9 @@ export const makeFirebaseDriver = ref => {
 
   // building query from fb api is simply mapping the args to chained fn calls
   const build = (args) => {
-    const stream = ValueStream(args.reduce(chain,ref)).replay(null, 1)
+    const stream = ValueStream(args.reduce(chain,ref))
+      .tap(console.log.bind(console,`firebase query ${args.join('/')}`))
+      .replay(null, 1)
     const disposable = stream.connect()
     compositeDisposable.add(disposable)
     return stream
@@ -83,7 +194,7 @@ export const makeFirebaseDriver = ref => {
 }
 
 const deleteResponse = (ref, listenerKey, responseKey) => {
-  console.log('removing',ref.key(),listenerKey,responseKey)
+  console.log('removing',ref.key,listenerKey,responseKey)
   ref.child(listenerKey).child(responseKey).remove()
 }
 
@@ -102,5 +213,6 @@ export const makeQueueDriver = (ref, src = 'responses', dest = 'tasks') =>
 
     return listenerKey =>
       ChildAddedStream(srcRef.child(listenerKey))
+        .tap(console.log.bind(console, `Response received for listenerKey (uid?) : ${listenerKey}`))
         .doAction(({key}) => deleteResponse(srcRef,listenerKey,key))
   }
