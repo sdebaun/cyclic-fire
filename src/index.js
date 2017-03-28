@@ -54,7 +54,15 @@ export const makeAuthDriver = firebase => {
 
     // This function calls the observer only when hasRedirectResult is true
     const nextUser = user => {
-      if (hasRedirectResult) { observer.onNext(user) }
+      if (hasRedirectResult) {
+        console.log(`authenticated user :`, {
+          displayName: user && user.displayName,
+          uid: user && user.uid,
+          email: user && user.email,
+          emailVerified: user && user.emailVerified
+        })
+        observer.onNext(user)
+      }
     }
 
     // Add onAuthStateChanged listener
@@ -64,6 +72,10 @@ export const makeAuthDriver = firebase => {
       }
 
       nextUser(user)
+    }, function errorHandler(error) {
+      console.error(`firebase.auth().onAuthStateChanged fails with error ${error.code}`, error)
+    }, function completeHandler() {
+      console.info(`firebase.auth().onAuthStateChanged listener is removed`)
     })
 
     // getRedirectResult listener
@@ -75,7 +87,8 @@ export const makeAuthDriver = firebase => {
       }
     })
     // Always set the flag
-    .catch(() => {
+    .catch(function (error){
+      console.error(`firebase.auth().getRedirectResult fails with error ${error.code}`, error)
       hasRedirectResult = true
     })
 
@@ -107,7 +120,7 @@ export const makeAuthDriver = firebase => {
   * @param {string} input.type 'popup', 'redirect' or 'logout'
   * @param {Array<string>} input.scopes a list of OAuth scopes to add to the
   *   provider
-  * @return {void}
+  * @return {function}
   */
   function authAction(input) {
     console.log(input)
@@ -119,17 +132,20 @@ export const makeAuthDriver = firebase => {
     }
 
     const action = actionMap[input.type]
-    return action(provider)
+    return action(provider);
   }
 
   function authDriver(input$) {
-    const inputSubscription = input$.subscribe(authAction)
+    const inputSubscription = input$.subscribe(authAction, function authErrorHandler(error) {
+      console.error(`firebase.auth fails with error ${error.code}`, error)
+    })
 
     let stream = auth$.distinctUntilChanged().replay(null, 1)
     const disposable = stream.connect()
     stream.dispose = () => {
       disposable.dispose()
       inputSubscription.dispose()
+      console.info(`disposing auth subscription`)
     }
     return stream
   }
@@ -159,7 +175,9 @@ export const makeFirebaseDriver = ref => {
 
   // building query from fb api is simply mapping the args to chained fn calls
   const build = (args) => {
-    const stream = ValueStream(args.reduce(chain,ref)).replay(null, 1)
+    const stream = ValueStream(args.reduce(chain,ref))
+      .tap(console.log.bind(console,`firebase query ${args.join('/')}`))
+      .replay(null, 1)
     const disposable = stream.connect()
     compositeDisposable.add(disposable)
     return stream
@@ -195,5 +213,6 @@ export const makeQueueDriver = (ref, src = 'responses', dest = 'tasks') =>
 
     return listenerKey =>
       ChildAddedStream(srcRef.child(listenerKey))
+        .tap(console.log.bind(console, `Response received for listenerKey (uid?) : ${listenerKey}`))
         .doAction(({key}) => deleteResponse(srcRef,listenerKey,key))
   }
